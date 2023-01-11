@@ -51,6 +51,9 @@ const API_PATH = {
     create_singer: '/api/singer?__v=0.67.0',
 }
 
+
+const SINGER_JSON = path.join(__dirname, "./singers.json");
+
 const createSinger = async (name) => {
     const url = SERVER_URL + API_PATH.create_singer;
     const resp = await fetch(url, { method: "post", body: JSON.stringify({ name, force: false }), headers: { authorization: token, 'Content-Type': 'application/json' } });
@@ -59,7 +62,7 @@ const createSinger = async (name) => {
     return json;
 };
 
-const singerJson = fs.readJSONSync("./singers.json");
+const singerJson = fs.readJSONSync(SINGER_JSON);
 console.log(`从JSON文件里读取到了${singerJson.length}条数据！`);
 
 const success = [];
@@ -94,5 +97,5 @@ await requestPool({
     maxLimit: 10
 })
 
-fs.writeJSONSync("success_singers.json", { totalLength : `成功${success.length}条`, data : success}, { spaces: 2 });
-fs.writeJSONSync("error_singers.json", { totalLength : `失败${error.length}条`, data : error}, { spaces: 2 });
+fs.writeJSONSync(path.join(__dirname, "success_singers.json"), { totalLength: `成功${success.length}条`, data: success }, { spaces: 2 });
+fs.writeJSONSync(path.join(__dirname, "error_singers.json"), { totalLength: `失败${error.length}条`, data: error }, { spaces: 2 });

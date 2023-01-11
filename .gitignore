@@ -16,3 +16,7 @@ dist/
 /config.json
 /config.json5
 /cache
+zx_scripts/error_singers.json
+zx_scripts/error_songs.json
+zx_scripts/success_singers.json
+zx_scripts/success_songs.json

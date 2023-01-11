@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-import 'zx/globals';
+// import 'zx/globals';
 import FormData from 'form-data'
 import fetch from 'node-fetch'
 
@@ -53,7 +53,7 @@ const API_PATH = {
     create_music: '/api/music?__v=0.67.0',
     upload_asset: '/form/asset?__v=0.67.0',
 }
-const MUSIC_DIR = "./musics";
+const MUSIC_DIR = path.join(__dirname,"./musics");
 const EXT_NAMES = ['.mp3'];
 
 const uploadAsset = async (filePath) => {
@@ -84,7 +84,7 @@ const createMusic = async (name, singerIds, sq) => {
 };
 
 const { data: singers } = await listSingers();
-console.log(singers);
+console.log(MUSIC_DIR);
 const files = (await fs.readdir(MUSIC_DIR)).filter(f => EXT_NAMES.includes(path.extname(f)));
 console.log(`扫描到${files.length}个音乐文件`);
 const errObj = [];
@@ -151,5 +151,5 @@ await requestPool({
     }
 })
 
-fs.writeJSONSync("success_songs.json", { totalLength: `成功${successObj.length}条`, data: successObj }, { spaces: 2 });
-fs.writeJSONSync("error_songs.json", { totalLength: `失败${errObj.length}条`, data: errObj }, { spaces: 2 });
+fs.writeJSONSync(path.join(__dirname,"./success_songs.json"), { totalLength: `成功${successObj.length}条`, data: successObj }, { spaces: 2 });
+fs.writeJSONSync(path.join(__dirname,"./error_songs.json"), { totalLength: `失败${errObj.length}条`, data: errObj }, { spaces: 2 });
