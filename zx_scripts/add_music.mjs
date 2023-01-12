@@ -52,8 +52,9 @@ const API_PATH = {
     list_singers: '/api/self_singer_list?__v=0.67.0',
     create_music: '/api/music?__v=0.67.0',
     upload_asset: '/form/asset?__v=0.67.0',
+    create_singer: '/api/singer?__v=0.67.0',
 }
-const MUSIC_DIR = path.join(__dirname,"./musics");
+const MUSIC_DIR = path.join(__dirname, "./musics");
 const EXT_NAMES = ['.mp3'];
 
 const uploadAsset = async (filePath) => {
@@ -83,6 +84,14 @@ const createMusic = async (name, singerIds, sq) => {
     return json;
 };
 
+const createSinger = async (name) => {
+    const url = SERVER_URL + API_PATH.create_singer;
+    const resp = await fetch(url, { method: "post", body: JSON.stringify({ name, force: false }), headers: { authorization: token, 'Content-Type': 'application/json' } });
+    const json = await resp.json();
+    console.log(json);
+    return json;
+};
+
 const { data: singers } = await listSingers();
 console.log(MUSIC_DIR);
 const files = (await fs.readdir(MUSIC_DIR)).filter(f => EXT_NAMES.includes(path.extname(f)));
@@ -95,15 +104,20 @@ await requestPool({
         try {
             const baseName = item.replace(path.extname(item), "");
             const [singerName, songName] = baseName.split(' - ');
-            const targetSinger = singers.find(s => s.name === singerName);
-            if(!targetSinger){
-                console.log(`歌曲：${item}，未在数据库找到对应的歌手！！！`);
-                errObj.push({
-                    fileName: item,
-                    filePath,
-                    error: '未在数据库找到对应的歌手'
-                })
-                return;
+            let targetSinger = singers.find(s => s.name === singerName);
+            if (!targetSinger) {
+                console.log(`歌曲：${item}，未在数据库找到对应的歌手,正在添加...`);
+                const createSingerRes = await createSinger(singerName);
+                if (createSingerRes.code !== 0) {
+                    errObj.push({
+                        fileName: item,
+                        filePath,
+                        error: `创建歌手：${singerName}失败`,
+                        createSingerRes
+                    })
+                    return;
+                }
+                targetSinger = { id: createSingerRes.data };
             }
             console.log(`正在上传歌曲文件：${item}...`);
             const uploadResult = await uploadAsset(filePath);
@@ -151,5 +165,5 @@ await requestPool({
     }
 })
 
-fs.writeJSONSync(path.join(__dirname,"./success_songs.json"), { totalLength: `成功${successObj.length}条`, data: successObj }, { spaces: 2 });
-fs.writeJSONSync(path.join(__dirname,"./error_songs.json"), { totalLength: `失败${errObj.length}条`, data: errObj }, { spaces: 2 });
+fs.writeJSONSync(path.join(__dirname, "./success_songs.json"), { totalLength: `成功${successObj.length}条`, data: successObj }, { spaces: 2 });
+fs.writeJSONSync(path.join(__dirname, "./error_songs.json"), { totalLength: `失败${errObj.length}条`, data: errObj }, { spaces: 2 });
