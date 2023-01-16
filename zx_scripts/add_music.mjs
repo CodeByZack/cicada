@@ -2,6 +2,8 @@
 // import 'zx/globals';
 import FormData from 'form-data'
 import fetch from 'node-fetch'
+import jsmediatags from 'jsmediatags';
+import { Readable } from 'stream';
 
 const requestPool = ({
     data = [],
@@ -46,21 +48,40 @@ const requestPool = ({
     return enqueue();
 };
 
+const extraMetaData = (filePath) => {
+
+    return new Promise((resolve) => {
+        jsmediatags.read(filePath, {
+            onSuccess: (tags) => {
+                resolve({
+                    lyric: tags.tags?.lyrics?.lyrics,
+                    picture: tags.tags?.picture
+                })
+            },
+            onError: () => {
+                resolve({})
+            }
+        });
+    });
+};
+
 const SERVER_URL = "http://localhost:8000";
-const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxIiwiaWF0IjoxNjczMzM2MTM0LCJleHAiOjE2ODg4ODgxMzR9.Mh8eGOHGH-TzGgOhyDTPnqk5Gb99PFqUfASuPUqYKRY";
+const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxIiwiaWF0IjoxNjczODU4Mzk5LCJleHAiOjE2ODk0MTAzOTl9.mPCiFSEHAkT6BnefsE9j1Gukz2xjwnbbdMfRDvEAcJM";
 const API_PATH = {
     list_singers: '/api/self_singer_list?__v=0.67.0',
     create_music: '/api/music?__v=0.67.0',
     upload_asset: '/form/asset?__v=0.67.0',
     create_singer: '/api/singer?__v=0.67.0',
+    update_music: '/api/music?__v=0.67.0',
+
 }
 const MUSIC_DIR = path.join(__dirname, "./musics");
 const EXT_NAMES = ['.mp3'];
 
-const uploadAsset = async (filePath) => {
+const uploadAsset = async (readstream,assetType) => {
     const form = new FormData({ maxDataSize: 1024 * 1024 * 100 });
-    form.append('asset', fs.createReadStream(filePath));
-    form.append('assetType', 'music_sq');
+    form.append('asset', readstream);
+    form.append('assetType', assetType);
     const url = SERVER_URL + API_PATH.upload_asset;
     const resp = await fetch(url, { body: form, method: "post", headers: { authorization: token, ...form.getHeaders() } });
     const json = await resp.json();
@@ -92,6 +113,19 @@ const createSinger = async (name) => {
     return json;
 };
 
+const updateMusic = async (musicId, key, value) => {
+    const url = SERVER_URL + API_PATH.update_music;
+    const parmas = {
+        id: musicId,
+        key,
+        value,
+    };
+    console.log({ musicId, key });
+    const resp = await fetch(url, { body: JSON.stringify(parmas), method: "put", headers: { authorization: token, 'Content-Type': 'application/json' } });
+    const json = await resp.json();
+    return json;
+};
+
 const { data: singers } = await listSingers();
 console.log(MUSIC_DIR);
 const files = (await fs.readdir(MUSIC_DIR)).filter(f => EXT_NAMES.includes(path.extname(f)));
@@ -104,7 +138,7 @@ await requestPool({
         try {
             const baseName = item.replace(path.extname(item), "");
             const [singerName, songName] = baseName.split(' - ');
-            let targetSinger = singers.find(s => s.name === singerName);
+            let targetSinger = singers?.find(s => s?.name === singerName);
             if (!targetSinger) {
                 console.log(`歌曲：${item}，未在数据库找到对应的歌手,正在添加...`);
                 const createSingerRes = await createSinger(singerName);
@@ -120,7 +154,7 @@ await requestPool({
                 targetSinger = { id: createSingerRes.data };
             }
             console.log(`正在上传歌曲文件：${item}...`);
-            const uploadResult = await uploadAsset(filePath);
+            const uploadResult = await uploadAsset(fs.createReadStream(filePath),'music_sq');
             if (uploadResult.code !== 0) {
                 errObj.push({
                     fileName: item,
@@ -144,6 +178,39 @@ await requestPool({
                 return;
             }
 
+
+            const { lyric, picture } = await extraMetaData(filePath);
+            if (lyric) {
+
+                const updateLryicResult = await updateMusic(createResult.data, 'lyric', [lyric]);
+                if (updateLryicResult.code !== 0) {
+                    console.log(updateLryicResult)
+                    console.log(`${item} - 保存歌词失败`);
+                } else {
+                    console.log(`${item} - 保存歌词成功`);
+                }
+
+            }
+
+            if (picture) {
+                // const blob = new buffer.Blob([new Uint8Array(picture.data)], { type: picture.format });
+                // const uploadResult = await uploadAsset(filePath);
+                // fs.writeFileSync(`${item}.jpg`, new Uint8Array(picture.data).createReadStream());
+                // const uploadResult = await uploadAsset(new Uint8Array(picture.data).createReadStream());
+                const uploadResult = await uploadAsset(Readable.from(Buffer.from(picture.data,"binary"),'music_cover'));
+                console.log(uploadResult);
+                const updateCoverResult = await updateMusic(createResult.data, 'cover', uploadResult.data);
+
+                if (updateCoverResult.code !== 0) {
+                    console.log(updateCoverResult)
+                    console.log(`${item} - 保存封面失败`);
+                } else {
+                    console.log(`${item} - 保存封面失败`);
+
+                }
+            }
+
+
             successObj.push({
                 fileName: item,
                 filePath,
@@ -152,6 +219,7 @@ await requestPool({
             })
             console.log(`成功创建歌曲：${item}！！！`);
         } catch (error) {
+            console.log(error);
             errObj.push({
                 fileName: item,
                 filePath,
