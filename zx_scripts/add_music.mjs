@@ -1,9 +1,28 @@
 #!/usr/bin/env zx
-// import 'zx/globals';
+import 'zx/globals';
 import FormData from 'form-data'
 import fetch from 'node-fetch'
 import jsmediatags from 'jsmediatags';
 import { Readable } from 'stream';
+import ora from 'ora';
+
+const SERVER_URL = "http://localhost:8000";
+const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxIiwiaWF0IjoxNjczOTQ0MjQ1LCJleHAiOjE2ODk0OTYyNDV9.gnV6cyWn6s2YifyYISK0m3_VctCk-rqJPKzzBtuGyxw";
+const API_PATH = {
+    list_singers: '/api/self_singer_list?__v=0.67.0',
+    create_music: '/api/music?__v=0.67.0',
+    upload_asset: '/form/asset?__v=0.67.0',
+    create_singer: '/api/singer?__v=0.67.0',
+    update_music: '/api/music?__v=0.67.0',
+
+}
+const MUSIC_DIR = path.join(__dirname, "./musics");
+const EXT_NAMES = ['.mp3'];
+const time = new Date();
+const nowTimeStr = `${time.getFullYear()}-${time.getMonth() + 1}-${time.getDay()}`;
+const successLogPath = path.join(__dirname,`${nowTimeStr}-success.log`);
+const errorLogPath = path.join(__dirname,`${nowTimeStr}-error.log`);
+
 
 const requestPool = ({
     data = [],
@@ -49,7 +68,6 @@ const requestPool = ({
 };
 
 const extraMetaData = (filePath) => {
-
     return new Promise((resolve) => {
         jsmediatags.read(filePath, {
             onSuccess: (tags) => {
@@ -65,25 +83,9 @@ const extraMetaData = (filePath) => {
     });
 };
 
-const SERVER_URL = "http://localhost:8000";
-const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxIiwiaWF0IjoxNjczODU4Mzk5LCJleHAiOjE2ODk0MTAzOTl9.mPCiFSEHAkT6BnefsE9j1Gukz2xjwnbbdMfRDvEAcJM";
-const API_PATH = {
-    list_singers: '/api/self_singer_list?__v=0.67.0',
-    create_music: '/api/music?__v=0.67.0',
-    upload_asset: '/form/asset?__v=0.67.0',
-    create_singer: '/api/singer?__v=0.67.0',
-    update_music: '/api/music?__v=0.67.0',
-
-}
-const MUSIC_DIR = path.join(__dirname, "./musics");
-const EXT_NAMES = ['.mp3'];
-
-const uploadAsset = async (readstream,assetType) => {
-    const form = new FormData({ maxDataSize: 1024 * 1024 * 100 });
-    form.append('asset', readstream);
-    form.append('assetType', assetType);
+const uploadAsset = async (formDta) => {
     const url = SERVER_URL + API_PATH.upload_asset;
-    const resp = await fetch(url, { body: form, method: "post", headers: { authorization: token, ...form.getHeaders() } });
+    const resp = await fetch(url, { body: formDta, method: "post", headers: { authorization: token, ...formDta.getHeaders() } });
     const json = await resp.json();
     return json;
 };
@@ -109,7 +111,6 @@ const createSinger = async (name) => {
     const url = SERVER_URL + API_PATH.create_singer;
     const resp = await fetch(url, { method: "post", body: JSON.stringify({ name, force: false }), headers: { authorization: token, 'Content-Type': 'application/json' } });
     const json = await resp.json();
-    console.log(json);
     return json;
 };
 
@@ -120,27 +121,48 @@ const updateMusic = async (musicId, key, value) => {
         key,
         value,
     };
-    console.log({ musicId, key });
     const resp = await fetch(url, { body: JSON.stringify(parmas), method: "put", headers: { authorization: token, 'Content-Type': 'application/json' } });
     const json = await resp.json();
     return json;
 };
 
 const { data: singers } = await listSingers();
-console.log(MUSIC_DIR);
+console.log(chalk.green('音乐文件夹地址：') + MUSIC_DIR);
 const files = (await fs.readdir(MUSIC_DIR)).filter(f => EXT_NAMES.includes(path.extname(f)));
-console.log(`扫描到${files.length}个音乐文件`);
+console.log(chalk.green(`扫描到${files.length}个音乐文件`));
 const errObj = [];
 const successObj = [];
+
+const taskLogs = [];
+const spinner = ora('=======开始创建音乐=======').start();
+spinner.prefixText = "";
+
+const logTaskStatus = (fileName) => (msg) => {
+    let targetTask = taskLogs.find(t => t.fileName === fileName);
+    if (!targetTask) {
+        targetTask = { fileName, msg };
+        taskLogs.push(targetTask);
+    }
+    targetTask.msg = msg;
+    spinner.color = "blue";
+    spinner.text = chalk.blue("正在上传...\n") + taskLogs.map(t => chalk.blue(t.fileName) + ":" + chalk.bgBlueBright(t.msg)).join('\n');
+};
+
+
+
 await requestPool({
     data: files, iteratee: async ({ index, item }) => {
         const filePath = path.join(MUSIC_DIR, item);
+        let recordLog = `《${item}》`;
         try {
             const baseName = item.replace(path.extname(item), "");
             const [singerName, songName] = baseName.split(' - ');
+            const taskLog = logTaskStatus(item);
             let targetSinger = singers?.find(s => s?.name === singerName);
             if (!targetSinger) {
-                console.log(`歌曲：${item}，未在数据库找到对应的歌手,正在添加...`);
+                // console.log(`歌曲：${item}，未在数据库找到对应的歌手,正在添加...`);
+                taskLog('未在数据库找到对应的歌手,正在添加...');
+                await sleep(1000);
                 const createSingerRes = await createSinger(singerName);
                 if (createSingerRes.code !== 0) {
                     errObj.push({
@@ -149,22 +171,32 @@ await requestPool({
                         error: `创建歌手：${singerName}失败`,
                         createSingerRes
                     })
+                    recordLog += `-创建歌手${singerName}失败\n`;
+                    fs.appendFileSync(errorLogPath, recordLog);
                     return;
                 }
                 targetSinger = { id: createSingerRes.data };
+                singers.push(targetSinger);
             }
-            console.log(`正在上传歌曲文件：${item}...`);
-            const uploadResult = await uploadAsset(fs.createReadStream(filePath),'music_sq');
+            taskLog('正在上传歌曲文件')
+            const form = new FormData();
+            form.append('asset', fs.createReadStream(filePath));
+            form.append('assetType', 'music_sq');
+            const uploadResult = await uploadAsset(form);
             if (uploadResult.code !== 0) {
                 errObj.push({
                     fileName: item,
                     filePath,
                     uploadResult,
                 })
-                console.log(`上传歌曲：${item}，失败！错误原因：${uploadResult.message}`);
+                recordLog += `-上传歌曲文件出错-${uploadResult.message}\n`;
+                taskLog(`上传歌曲文件出错-${uploadResult.message}`);
+                fs.appendFileSync(errorLogPath, recordLog);
                 return;
             }
-            console.log(`正在创建歌曲：${item}...`);
+            recordLog += "-歌曲上传成功";
+            taskLog('正在创建歌曲....');
+            await sleep(1000);
             const createResult = await createMusic(songName, [targetSinger.id], uploadResult.data.id);
 
             if (createResult.code !== 0) {
@@ -174,38 +206,42 @@ await requestPool({
                     uploadResult,
                     createResult
                 })
-                console.log(`创建歌曲：${item}，失败！错误原因：${createResult.message}`);
+                recordLog += `-创建歌曲出错-${createResult.message}\n`;
+                taskLog(`创建歌曲出错-${createResult.message}`);
+                fs.appendFileSync(errorLogPath, recordLog);
                 return;
             }
-
-
             const { lyric, picture } = await extraMetaData(filePath);
             if (lyric) {
-
+                taskLog('正在上传歌词....');
+                await sleep(1000);
                 const updateLryicResult = await updateMusic(createResult.data, 'lyric', [lyric]);
                 if (updateLryicResult.code !== 0) {
-                    console.log(updateLryicResult)
-                    console.log(`${item} - 保存歌词失败`);
+                    taskLog('保存歌词失败');
+                    recordLog += "-歌词保存失败";
                 } else {
-                    console.log(`${item} - 保存歌词成功`);
+                    recordLog += "-歌词保存成功";
+                    taskLog('保存歌词成功');
                 }
 
             }
 
             if (picture) {
-                // const blob = new buffer.Blob([new Uint8Array(picture.data)], { type: picture.format });
-                // const uploadResult = await uploadAsset(filePath);
-                // fs.writeFileSync(`${item}.jpg`, new Uint8Array(picture.data).createReadStream());
-                // const uploadResult = await uploadAsset(new Uint8Array(picture.data).createReadStream());
-                const uploadResult = await uploadAsset(Readable.from(Buffer.from(picture.data,"binary"),'music_cover'));
-                console.log(uploadResult);
-                const updateCoverResult = await updateMusic(createResult.data, 'cover', uploadResult.data);
-
+                const fileBuffer = Buffer.from(picture.data, "binary");
+                const fileSize = Buffer.byteLength(fileBuffer);
+                const form = new FormData();
+                form.append('asset', Readable.from(Buffer.from(fileBuffer)), { filename: `${item}.jpg`, knownLength: fileSize });
+                form.append('assetType', 'music_cover');
+                taskLog('正在上传封面图片....');
+                await sleep(1000);
+                const uploadResult = await uploadAsset(form);
+                const updateCoverResult = await updateMusic(createResult.data, 'cover', uploadResult.data.id);
                 if (updateCoverResult.code !== 0) {
-                    console.log(updateCoverResult)
-                    console.log(`${item} - 保存封面失败`);
+                    recordLog += "-封面保存失败";
+                    taskLog('保存封面失败');
                 } else {
-                    console.log(`${item} - 保存封面失败`);
+                    recordLog += "-封面保存成功";
+                    taskLog('保存封面成功');
 
                 }
             }
@@ -217,21 +253,29 @@ await requestPool({
                 uploadResult,
                 createResult
             })
-            console.log(`成功创建歌曲：${item}！！！`);
+            recordLog += "-成功创建\n";
+            taskLog('成功创建歌曲');
+            fs.appendFileSync(successLogPath, recordLog);
         } catch (error) {
-            console.log(error);
             errObj.push({
                 fileName: item,
                 filePath,
                 error: error.message
             })
-            console.log(`创建歌曲：${item}，失败！错误原因：${error.message}`);
-
+            taskLog(`创建歌曲出错-${error.message}`);
+            recordLog += `-创建歌曲出错${error.message}\n`;
+            fs.appendFileSync(errorLogPath, recordLog);
+        } finally {
+            // 剔除当前的log对象
+            const targetTaskIndex = taskLogs.findIndex(t => t.fileName === item);
+            if (targetTaskIndex > -1) {
+                taskLogs.splice(targetTaskIndex, 1);
+            }
         }
 
 
     }
 })
 
-fs.writeJSONSync(path.join(__dirname, "./success_songs.json"), { totalLength: `成功${successObj.length}条`, data: successObj }, { spaces: 2 });
-fs.writeJSONSync(path.join(__dirname, "./error_songs.json"), { totalLength: `失败${errObj.length}条`, data: errObj }, { spaces: 2 });
+spinner.text = chalk.green(`上传完毕，成功${successObj.length}首,失败${errObj.length}首！`)
+spinner.succeed();
