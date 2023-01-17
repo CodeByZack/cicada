@@ -1,13 +1,16 @@
 #!/usr/bin/env zx
-import 'zx/globals';
+// import 'zx/globals';
 import FormData from 'form-data'
 import fetch from 'node-fetch'
 import jsmediatags from 'jsmediatags';
 import { Readable } from 'stream';
 import ora from 'ora';
+import path from 'path';
 
 const SERVER_URL = "http://localhost:8000";
 const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxIiwiaWF0IjoxNjczOTQ0MjQ1LCJleHAiOjE2ODk0OTYyNDV9.gnV6cyWn6s2YifyYISK0m3_VctCk-rqJPKzzBtuGyxw";
+// const SERVER_URL = "http://10.168.1.100:8000";
+// const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxIiwiaWF0IjoxNjczMDA4NjE3LCJleHAiOjE2ODg1NjA2MTd9.XJzFNLq_5Mj7RB4YKwWt2AYKWEurWXPsePBkjzSQLOY";
 const API_PATH = {
     list_singers: '/api/self_singer_list?__v=0.67.0',
     create_music: '/api/music?__v=0.67.0',
@@ -23,6 +26,17 @@ const nowTimeStr = `${time.getFullYear()}-${time.getMonth() + 1}-${time.getDay()
 const successLogPath = path.join(__dirname,`${nowTimeStr}-success.log`);
 const errorLogPath = path.join(__dirname,`${nowTimeStr}-error.log`);
 
+
+const walkSync = (currentDirPath, callback) => {
+    fs.readdirSync(currentDirPath, { withFileTypes: true }).forEach(function(dirent) {
+        const filePath = path.join(currentDirPath, dirent.name);
+        if (dirent.isFile()) {
+            callback(filePath, dirent);
+        } else if (dirent.isDirectory()) {
+            walkSync(filePath, callback);
+        }
+    });
+}
 
 const requestPool = ({
     data = [],
@@ -126,16 +140,20 @@ const updateMusic = async (musicId, key, value) => {
     return json;
 };
 
-const { data: singers } = await listSingers();
 console.log(chalk.green('音乐文件夹地址：') + MUSIC_DIR);
-const files = (await fs.readdir(MUSIC_DIR)).filter(f => EXT_NAMES.includes(path.extname(f)));
-console.log(chalk.green(`扫描到${files.length}个音乐文件`));
+const spinner = ora(chalk.blue('=======扫描音频文件中=======')).start();
+
+const files = [];
+walkSync(MUSIC_DIR,(filePath)=>{
+    if(EXT_NAMES.includes(path.extname(filePath))){
+        files.push(filePath);
+    }
+});
+spinner.succeed(chalk.green(`扫描到${files.length}个音乐文件`));
 const errObj = [];
 const successObj = [];
-
 const taskLogs = [];
-const spinner = ora('=======开始创建音乐=======').start();
-spinner.prefixText = "";
+spinner.start("=======开始创建音乐=======");
 
 const logTaskStatus = (fileName) => (msg) => {
     let targetTask = taskLogs.find(t => t.fileName === fileName);
@@ -148,12 +166,11 @@ const logTaskStatus = (fileName) => (msg) => {
     spinner.text = chalk.blue("正在上传...\n") + taskLogs.map(t => chalk.blue(t.fileName) + ":" + chalk.bgBlueBright(t.msg)).join('\n');
 };
 
-
-
+const { data: singers } = await listSingers();
 await requestPool({
     data: files, iteratee: async ({ index, item }) => {
         const filePath = path.join(MUSIC_DIR, item);
-        let recordLog = `《${item}》`;
+        let recordLog = `《${path.basename(item)}》`;
         try {
             const baseName = item.replace(path.extname(item), "");
             const [singerName, songName] = baseName.split(' - ');
